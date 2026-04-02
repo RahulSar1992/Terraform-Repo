@@ -1,0 +1,93 @@
+def add_entry_in_kvstore(self, group_id, method_type):
+    try:
+        logger.info("add_entry_in_kvstore method")
+        date_object = datetime.datetime.today()
+        created_date = date_object.strftime("%Y-%m-%d %H:%M:%S")
+        payload = '{"episode_id":"' + group_id + '", "date_created":"' + created_date + '", "method_type":"' + method_type + '"}'
+        last_exception = None
+        for kv_prefix_url in kvstore_url_prefix_array:
+            try:
+                kv_url = kv_prefix_url + kvstore_url
+                res = requests.post(
+                    kv_url,
+                    headers=kvstore_headers,
+                    data=payload,
+                    auth=HTTPBasicAuth(kvstore_userid, kvstore_passwd),
+                    verify=False,
+                    timeout=10
+                )
+                respStatus = int(res.status_code)
+                logger.info("response status in add_entry_in_kvstore")
+                if 200 <= respStatus < 300:
+                    return True
+                logger.warning("add_entry_in_kvstore received non-success status=%d for url=%s" % (respStatus, kv_url))
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                logger.warning("add_entry_in_kvstore failed for url=%s error=%s" % (kv_prefix_url, str(e)))
+        if last_exception is not None:
+            raise last_exception
+        return False
+    except:
+        logger.error("error in Catch add_entry_in_kvstore")
+        logger.error(sys.exc_info())
+        return False
+
+
+###
+What changed:
+
+added per-node try/except
+added timeout=10
+continue to next KV-store host if one host fails
+return success immediately when one node works
+###
+
+def read_entry_from_kvstore(self, group_id):
+    try:
+        logger.info("read_entry_from_kvstore method")
+        last_exception = None
+        for kv_prefix_url in kvstore_url_prefix_array:
+            fileData = []
+            try:
+                kv_url = kv_prefix_url + kvstore_url
+                res = requests.get(
+                    kv_url,
+                    headers=kvstore_headers,
+                    auth=HTTPBasicAuth(kvstore_userid, kvstore_passwd),
+                    verify=False,
+                    timeout=10
+                )
+                respStatus = int(res.status_code)
+                logger.info("response status in read_entry_from_kvstore")
+                if not 200 <= respStatus < 300:
+                    logger.warning("read_entry_from_kvstore received non-success status=%d for url=%s" % (respStatus, kv_url))
+                    continue
+                respContent = json.loads(res.content)
+                for value in respContent:
+                    if "date_created" not in value:
+                        value["date_created"] = ""
+                    if "method_type" not in value:
+                        value["method_type"] = ""
+                    if "episode_id" not in value:
+                        value["episode_id"] = ""
+                    line = str(value["date_created"] + " request_type=" + value["method_type"] + ",itsi_group_id=" + value["episode_id"])
+                    fileData.append(line)
+                return fileData
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                logger.warning("read_entry_from_kvstore failed for url=%s error=%s" % (kv_prefix_url, str(e)))
+        if last_exception is not None:
+            raise last_exception
+        return []
+    except:
+        logger.error("error in catch read_entry_frm_kvstore")
+        logger.error(sys.exc_info())
+        return []
+
+
+What changed:
+
+added per-host failover handling
+added timeout=10
+if vm1 times out, it now tries vm2, then vm3
+returns [] instead of crashing the whole flow when every node fails
